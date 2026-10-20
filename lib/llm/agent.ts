@@ -158,8 +158,8 @@ function buildQuestionMapPrompt(questions: QuestionMapPromptInfo, focusNodeId: s
   if (!questions.canPropose) return ''
   const lines = [
     'Historial de dudas: es el árbol de preguntas de la materia que el estudiante ve y usa para volver a cualquier tema. Acción: {"type":"propose_question_node","parent_node_id":<id de la lista o null>,"title":<alias de 2 a 6 palabras>,"description":<qué se resolvió, en una oración>}.',
-    '- El nodo representa la duda que el estudiante ACABA de hacer y que esta respuesta resolvió; nunca un tema que podría venir después. Proponé UN nodo en cada respuesta que resuelva una duda concreta nueva (un concepto, un ejercicio, un paso o un método) que todavía no figure en la lista. No lo propongas para saludos, agradecimientos ni repreguntas que siguen dentro del mismo tema de un nodo existente.',
-    '- title: el mismo concepto que pusiste en description (por ejemplo, a «¿Qué es una derivada?» le corresponde «Definición de derivada», no «Aplicaciones de la derivada»). Nunca copies la pregunta.',
+    '- El nodo representa la duda que el estudiante ACABA de hacer y que esta respuesta resolvió; nunca un tema que podría venir después. Incluí UN nodo en TODAS tus respuestas, incluso saludos, agradecimientos y repreguntas: se agrega solo al historial, sin que el estudiante lo confirme. Si la duda sigue dentro del tema de un nodo existente, colgala de ese nodo con un título propio (el paso, el caso o el matiz que se preguntó) en lugar de repetir el título.',
+    '- title: el mismo concepto que pusiste en description (por ejemplo, a «¿Qué es una derivada?�� le corresponde «Definición de derivada», no «Aplicaciones de la derivada»). Nunca copies la pregunta.',
     '- parent_node_id, en este orden: 1) si el estudiante eligió un nodo para continuar, ese; 2) si la duda profundiza o sigue la conversación reciente, el nodo marcado (actual); 3) si no, el nodo existente más general del que es un subtema (puede ser de otra sesión), prefiriendo el concepto antes que un ejemplo; 4) null si no se relaciona con ninguno.',
   ]
   if (questions.nodes.length) {
