@@ -13,7 +13,7 @@ import {
   ZoomOut,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import {
   connectFolderNodes,
@@ -76,6 +76,14 @@ export function FolderGraph({
   const [results, setResults] = useState<{ id: string; title: string; type: string }[] | null>(null)
 
   const selectedNode = nodes.find((node) => node.id === selected) ?? null
+  const notePanelRef = useRef<HTMLDivElement>(null)
+
+  // El panel se dibuja debajo del canvas: en pantallas bajas queda fuera de vista.
+  const panelReady = selected !== null && draft !== null
+  useEffect(() => {
+    if (!panelReady) return
+    notePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [selected, panelReady])
 
   const canvas = useNodeCanvas({
     nodes,
@@ -398,7 +406,7 @@ export function FolderGraph({
       </div>
 
       {selectedNode && draft && (
-        <div className="note-panel">
+        <div className="note-panel" ref={notePanelRef}>
           <div className="note-head">
             <div className="note-head-main">
               <span className="detail-label">
