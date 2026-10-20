@@ -32,8 +32,10 @@ import {
 } from '@/lib/tree/branch'
 import { composeContext, inheritedSize, otherBranches, type BranchNote } from '@/lib/tree/compose'
 import { shortLabel } from '@/lib/tree/alias'
+import { splitAnswerByHeadings } from '@/lib/tree/split-answer'
 import {
   INHERITED_COMPACT_CHARS,
+  MAX_NODES_PER_CONVERSATION,
   MAX_PROPOSALS_PER_MESSAGE,
   QUESTION_ALIAS_MAX,
 } from '@/lib/tree/config'
@@ -56,7 +58,13 @@ const CITATION_MARKERS = /\s?\[F\d+(?:\s*[,;]\s*F?\d+)*\]/g
 
 const normalizeTitle = (title: string) => title.trim().toLocaleLowerCase('es')
 
-type HistoryNodeInput = { parentId: string | null; title: string; summary: string | null }
+type HistoryNodeInput = {
+  parentId: string | null
+  title: string
+  summary: string | null
+  /** Respuesta propia de esta duda cuando el mensaje traía varias. */
+  answer: string | null
+}
 
 /**
  * Crea los nodos del historial de dudas de este turno sin pedir confirmación: el historial es
@@ -352,6 +360,7 @@ export async function sendMessage(
     parentId: a.parent_node_id,
     title: a.title,
     summary: a.description,
+    answer: a.answer?.trim() || null,
   }))
   if (historyNodes.length === 0) {
     const questionText = content.replace(/[¿?]/g, '').replace(/\s+/g, ' ').trim() || content
@@ -363,6 +372,7 @@ export async function sendMessage(
       parentId: focusNode?.id ?? currentNode?.id ?? null,
       title: fallbackTitle,
       summary: result.response.description ?? null,
+      answer: null,
     })
   }
 
@@ -449,25 +459,72 @@ export async function sendMessage(
       ? result.response.description
       : conversation.title
 
+  // Con varias dudas, cada una se guarda como su propio mensaje: la primera sigue en esta rama y
+  // las demás abren una rama hermana desde la pregunta, así cada nodo del mapa abre su respuesta.
+  // Si el modelo no separó las respuestas, se intenta cortar "output" por sus títulos.
+  const answers =
+    savedFallback || historyNodes.length < 2
+      ? null
+      : historyNodes.every((n) => n.answer)
+        ? historyNodes.map((n) => n.answer!)
+        : splitAnswerByHeadings(
+            result.response.output,
+            historyNodes.map((n) => n.title),
+          )
+  const canSplit = answers !== null && tree.length + historyNodes.length - 1 <= MAX_NODES_PER_CONVERSATION
+  const replies = canSplit
+    ? historyNodes.map((n, i) => ({
+        nodes: [n],
+        description: n.summary ?? result.response.description,
+        ...applyGrounding(answers[i], result.response.grounding, retrieval),
+      }))
+    : [{ nodes: historyNodes, description: result.response.description, ...grounded }]
+  const siblingBranches = tree.filter((n) => n.parentId === nodeId).length
+
   await db.$transaction(async (tx) => {
-    await tx.message.create({ data: { conversationId, userId, nodeId, role: 'user', content } })
-    const reply = await tx.message.create({
-      data: {
-        conversationId,
-        userId,
-        nodeId,
-        role: 'assistant',
-        content: grounded.output,
-        description: result.response.description,
-        metadata: { ...result.metadata, droppedActions, rag: grounded.rag, fabric: fabricMeta, tools: toolsMeta },
-      },
+    const userMessage = await tx.message.create({
+      data: { conversationId, userId, nodeId, role: 'user', content },
       select: { id: true },
     })
-    await createHistoryNodes(
-      tx,
-      { userId, conversationId, subjectId: conversation.subjectId, messageId: reply.id },
-      historyNodes,
-    )
+    let firstReplyId: string | null = null
+    for (const [index, part] of replies.entries()) {
+      const branchId =
+        index === 0
+          ? nodeId
+          : (
+              await tx.conversationNode.create({
+                data: {
+                  conversationId,
+                  userId,
+                  parentId: nodeId,
+                  anchorMessageId: userMessage.id,
+                  alias: shortLabel(part.nodes[0].title, QUESTION_ALIAS_MAX),
+                  topic: part.description?.trim() || part.nodes[0].title,
+                  position: siblingBranches + index - 1,
+                },
+                select: { id: true },
+              })
+            ).id
+      const reply = await tx.message.create({
+        data: {
+          conversationId,
+          userId,
+          nodeId: branchId,
+          role: 'assistant',
+          content: part.output,
+          description: part.description,
+          metadata: { ...result.metadata, droppedActions, rag: part.rag, fabric: fabricMeta, tools: toolsMeta },
+        },
+        select: { id: true },
+      })
+      firstReplyId ??= reply.id
+      await createHistoryNodes(
+        tx,
+        { userId, conversationId, subjectId: conversation.subjectId, messageId: reply.id },
+        part.nodes,
+      )
+    }
+    const reply = { id: firstReplyId! }
     if (actions.length) {
       await tx.agentAction.createMany({
         data: actions.map((a) => ({

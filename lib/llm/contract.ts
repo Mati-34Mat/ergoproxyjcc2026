@@ -70,10 +70,13 @@ const proposeQuestionNodePlain = z.object({
   parent_node_id: z.string().trim().max(64).nullable(),
   title: z.string().trim().min(1).max(60),
   description: z.string().trim().min(1).max(200),
+  /** Parte de la respuesta que resuelve SOLO esta duda; con varias dudas cada una se guarda aparte. */
+  answer: z.string().trim().max(8000).nullable(),
 })
 
 export const proposeQuestionNodeSchema = proposeQuestionNodePlain.extend({
   parent_node_id: proposeQuestionNodePlain.shape.parent_node_id.default(null),
+  answer: proposeQuestionNodePlain.shape.answer.default(null),
 })
 
 export const agentActionSchema = z.union([
