@@ -52,8 +52,22 @@ const proposeFolderChangeBase = z.object({
   reason: z.string().trim().min(1).max(REASON_MAX),
 })
 
-/** Versión sin refinamientos: la que se le exige al proveedor (JSON Schema plano). */
-export const proposeFolderChangePlain = proposeFolderChangeBase
+/**
+ * Versión sin refinamientos ni defaults: la que se le exige al proveedor (JSON Schema plano).
+ * OpenAI exige que todas las propiedades figuren en `required`, y `.default(null)` las vuelve opcionales.
+ */
+export const proposeFolderChangePlain = z.object({
+  type: z.literal('propose_folder_change'),
+  operation: z.enum(FOLDER_OPERATIONS),
+  target_node_id: z.string().trim().max(64).nullable(),
+  related_node_id: z.string().trim().max(64).nullable(),
+  edge_kind: z.enum(FOLDER_EDGE_KINDS).nullable(),
+  node_type: z.enum(FOLDER_NODE_TYPES).nullable(),
+  title: z.string().trim().max(TITLE_MAX).nullable(),
+  content_md: z.string().trim().max(CONTENT_MAX).nullable(),
+  solution_md: z.string().trim().max(CONTENT_MAX).nullable(),
+  reason: z.string().trim().min(1).max(REASON_MAX),
+})
 
 /** Versión con la validación por operación, para parsear payloads guardados. */
 export const proposeFolderChangeSchema = proposeFolderChangeBase.superRefine((value, ctx) => {

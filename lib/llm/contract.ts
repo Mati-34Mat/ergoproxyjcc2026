@@ -67,6 +67,17 @@ export const proposeQuestionNodeSchema = z.object({
   description: z.string().trim().min(1).max(200),
 })
 
+/**
+ * Variante para el proveedor: OpenAI exige que todas las propiedades figuren en `required`,
+ * y `.default(null)` las vuelve opcionales en el JSON Schema. El valor sigue siendo `string | null`.
+ */
+const proposeQuestionNodeGenerationSchema = z.object({
+  type: z.literal('propose_question_node'),
+  parent_node_id: z.string().trim().max(64).nullable(),
+  title: z.string().trim().min(1).max(60),
+  description: z.string().trim().min(1).max(200),
+})
+
 export const agentActionSchema = z.union([
   proposeHistoryBranchSchema,
   proposeQuestionNodeSchema,
@@ -130,7 +141,7 @@ export const agentResponseSchema = z.object({
   actions: z.array(
     z.union([
       proposeHistoryBranchSchema,
-      proposeQuestionNodeSchema,
+      proposeQuestionNodeGenerationSchema,
       proposeFolderChangePlain,
       proposeDiagramSchema,
       generateFileSchema,
