@@ -79,7 +79,7 @@ async function createHistoryNodes(
     const siblingCount = await tx.questionNode.count({
       where: parent
         ? { userId: ctx.userId, parentId: parent.id }
-        : { userId: ctx.userId, parentId: null, subjectId },
+        : { userId: ctx.userId, parentId: null, conversationId: ctx.conversationId },
     })
     await tx.questionNode.create({
       data: {

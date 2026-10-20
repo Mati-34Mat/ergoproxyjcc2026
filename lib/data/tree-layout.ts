@@ -9,6 +9,7 @@
 const ROOT_Y = 12
 const ROW_GAP = 18
 const SIBLING_GAP = 15
+const ROOTS_PER_ROW = 4
 const MIN_X = 6
 const MAX_X = 94
 const MAX_Y = 92
@@ -28,8 +29,14 @@ export function nextNodePosition({
   siblingCount: number
 }): NodePosition {
   if (!parent) {
-    // Las raíces se reparten en una fila arriba.
-    return { posX: clamp(20 + siblingCount * 22, MIN_X, MAX_X), posY: ROOT_Y }
+    // Las raíces se reparten en filas de ROOTS_PER_ROW; al llenarse una fila se baja a la
+    // siguiente en vez de apilarlas todas contra el borde derecho.
+    const column = siblingCount % ROOTS_PER_ROW
+    const row = Math.floor(siblingCount / ROOTS_PER_ROW)
+    return {
+      posX: clamp(20 + column * 22, MIN_X, MAX_X),
+      posY: clamp(ROOT_Y + row * ROW_GAP * 2, 0, MAX_Y),
+    }
   }
 
   // Los hijos se abren en abanico alrededor del padre: derecha, izquierda, y

@@ -170,7 +170,7 @@ async function acceptQuestionNode(
   const siblingCount = await db.questionNode.count({
     where: parent_node_id
       ? { userId, parentId: parent_node_id }
-      : { userId, parentId: null, subjectId: nodeSubjectId },
+      : { userId, parentId: null, conversationId: action.conversationId },
   })
   const position = nextNodePosition({ parent: parentPosition, siblingCount })
 
