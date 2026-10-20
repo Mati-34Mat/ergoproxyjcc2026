@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { resolveAgentAction, setActiveNode } from '@/app/actions/agent-actions'
 import { sendMessage } from '@/app/actions/chat'
 import { createConversation } from '@/app/actions/conversations'
+import { continueFromQuestionNode } from '@/app/actions/questions'
 import { Markdown } from '@/components/chat/markdown'
 import { HistoryOverlay, type HistoryNode } from '@/components/nodo/history-overlay'
 import { pluralize } from '@/lib/format'
@@ -72,15 +73,28 @@ export function ChatView({
   const focusNode = nodes.find((node) => node.id === selectedNode) ?? null
   const branchStart = branch ? messages.findIndex((message) => !message.inherited) : -1
 
-  /** Un nodo de otra sesión se continúa en esa sesión: ahí está el camino que lo explica. */
+  /**
+   * Bifurca en el servidor donde nació la duda y abre ese chat en la rama nueva. Un nodo sin sesión
+   * de origen no tiene dónde bifurcar: queda como foco del próximo mensaje.
+   */
   function continueFrom(id: string | null) {
-    const node = nodes.find((candidate) => candidate.id === id)
-    setShowHistory(false)
-    if (node?.conversationId && node.conversationId !== activeId) {
-      router.push(`/subjects/${subjectId}?sesion=${node.conversationId}&desde=${node.id}`)
-      return
-    }
-    setSelectedNode(id)
+    if (!id || pending) return
+    startTransition(async () => {
+      const result = await continueFromQuestionNode(id)
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      setShowHistory(false)
+      const conversationId = result.data?.conversationId
+      if (!conversationId) {
+        setSelectedNode(id)
+        return
+      }
+      setSelectedNode(null)
+      if (conversationId === activeId) router.refresh()
+      else openSession(conversationId)
+    })
   }
 
   function backToMain() {
