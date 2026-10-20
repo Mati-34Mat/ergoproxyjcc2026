@@ -33,16 +33,42 @@ export function extractJson(text: string): unknown {
   }
 }
 
+/**
+ * Un `append_content` sin apunte de destino pero con título y contenido es un apunte nuevo
+ * mal etiquetado (pasa cuando la Carpeta no tiene el tema). Se reetiqueta en vez de descartarlo.
+ */
+function relabelOrphanAppend(item: unknown): unknown {
+  if (!item || typeof item !== 'object') return item
+  const a = item as Record<string, unknown>
+  const has = (v: unknown) => typeof v === 'string' && v.trim().length > 0
+  if (
+    a.type === 'propose_folder_change' &&
+    a.operation === 'append_content' &&
+    !has(a.target_node_id) &&
+    has(a.title) &&
+    has(a.content_md)
+  ) {
+    return { ...a, operation: 'create_node' }
+  }
+  return item
+}
+
 /** Valida cada acción por separado: las inválidas se descartan, nunca se ejecutan. */
 export function validateActions(raw: unknown[]) {
   const valid: AgentActionProposal[] = []
+  const issues: string[] = []
   let dropped = 0
-  for (const item of raw) {
+  for (const original of raw) {
+    const item = relabelOrphanAppend(original)
     const parsed = agentActionSchema.safeParse(item)
     if (parsed.success) valid.push(parsed.data)
-    else dropped += 1
+    else {
+      dropped += 1
+      const type = (item as { type?: unknown } | null)?.type
+      issues.push(`${typeof type === 'string' ? type : 'acción'}: ${parsed.error.issues.map((i) => i.message).slice(0, 3).join(' | ')}`)
+    }
   }
-  return { valid, dropped }
+  return { valid, dropped, issues }
 }
 
 /** Recupera una respuesta cuando el proveedor no cumplió el esquema. Devuelve null si no hay texto utilizable. */

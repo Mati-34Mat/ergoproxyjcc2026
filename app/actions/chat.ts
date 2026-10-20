@@ -4,8 +4,10 @@ import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
 import { z } from 'zod'
 import { isUuid } from '@/lib/data/queries'
+import { nextNodePosition } from '@/lib/data/tree-layout'
 import { db } from '@/lib/db'
 import { MAX_NODES_PER_WORKSPACE } from '@/lib/folder/config'
+import { buildSaveProposal, wantsFolderSave } from '@/lib/folder/logic'
 import { loadFolderIndex, prepareFolderProposals } from '@/lib/folder/server'
 import { AgentError, runAgent } from '@/lib/llm/agent'
 import { isConversationMode, type ToolsMetadata } from '@/lib/llm/contract'
@@ -47,6 +49,46 @@ const QUESTION_TITLE_MAX = 60
 const CITATION_MARKERS = /\s?\[F\d+(?:\s*[,;]\s*F?\d+)*\]/g
 
 const normalizeTitle = (title: string) => title.trim().toLocaleLowerCase('es')
+
+type HistoryNodeInput = { parentId: string | null; title: string; summary: string | null }
+
+/**
+ * Crea los nodos del historial de dudas de este turno sin pedir confirmación: el historial es
+ * el registro de lo que se preguntó, no un cambio sobre los apuntes. El padre se vuelve a leer
+ * filtrando por userId, así que un id ajeno nunca cuelga un nodo de otro usuario.
+ */
+async function createHistoryNodes(
+  tx: Parameters<Parameters<typeof db.$transaction>[0]>[0],
+  ctx: { userId: string; conversationId: string; subjectId: string | null; messageId: string },
+  nodes: HistoryNodeInput[],
+) {
+  for (const node of nodes) {
+    const parent = node.parentId
+      ? await tx.questionNode.findFirst({
+          where: { id: node.parentId, userId: ctx.userId },
+          select: { id: true, subjectId: true, posX: true, posY: true },
+        })
+      : null
+    const subjectId = ctx.subjectId ?? parent?.subjectId ?? null
+    const siblingCount = await tx.questionNode.count({
+      where: parent
+        ? { userId: ctx.userId, parentId: parent.id }
+        : { userId: ctx.userId, parentId: null, subjectId },
+    })
+    await tx.questionNode.create({
+      data: {
+        userId: ctx.userId,
+        question: node.title,
+        answerSummary: node.summary,
+        parentId: parent?.id ?? null,
+        subjectId,
+        conversationId: ctx.conversationId,
+        messageId: ctx.messageId,
+        ...nextNodePosition({ parent: parent ? { posX: parent.posX, posY: parent.posY } : null, siblingCount }),
+      },
+    })
+  }
+}
 
 export async function sendMessage(
   conversationId: string,
@@ -277,12 +319,51 @@ export async function sendMessage(
       return [action]
     })
     .slice(0, MAX_PROPOSALS_PER_MESSAGE)
+
+  // Cada mensaje deja al menos un nodo: si el modelo no aportó ninguno válido (repregunta, título
+  // repetido, padre inexistente, acción descartada), el nodo sale de la duda de la persona.
+  const historyNodes: HistoryNodeInput[] = questionActions.map((a) => ({
+    parentId: a.parent_node_id,
+    title: a.title,
+    summary: a.description,
+  }))
+  if (historyNodes.length === 0) {
+    const questionText = content.replace(/[¿?]/g, '').replace(/\s+/g, ' ').trim() || content
+    const fallbackTitle =
+      [answerAlias, questionText].find(
+        (t) => t && t.length <= QUESTION_TITLE_MAX && !takenTitles.has(normalizeTitle(t)),
+      ) ?? questionText.slice(0, QUESTION_TITLE_MAX).trim()
+    historyNodes.push({
+      parentId: focusNode?.id ?? currentNode?.id ?? null,
+      title: fallbackTitle,
+      summary: result.response.description ?? null,
+    })
+  }
+
   // Las de Carpeta se validan contra los apuntes reales: ids inventados y duplicados se descartan acá.
-  const folderPrepared = await prepareFolderProposals(
+  let folderPrepared = await prepareFolderProposals(
     userId,
     conversation.subjectId,
     proposed.filter((a) => a.type === 'propose_folder_change'),
   )
+  // Si pidió guardar y el modelo no emitió una propuesta válida, se arma una con la última
+  // respuesta del tutor. Sigue siendo una propuesta: la persona la confirma.
+  let savedFallback = false
+  const lastAssistantText = context.messages
+    .findLast((m) => m.role === 'assistant')
+    ?.content.replace(CITATION_MARKERS, '')
+  if (
+    wantsFolderSave(content) &&
+    folderPrepared.valid.length === 0 &&
+    folderIndex.nodes.length < MAX_NODES_PER_WORKSPACE &&
+    lastAssistantText
+  ) {
+    const fallback = buildSaveProposal(lastAssistantText)
+    if (fallback) {
+      folderPrepared = await prepareFolderProposals(userId, conversation.subjectId, [fallback])
+      savedFallback = folderPrepared.valid.length > 0
+    }
+  }
 
   // Jev decide qué skill de Fabric conviene para transformar el contenido que irá a la
   // Carpeta. El usuario sigue aprobando y editando: acá sólo se prepara el borrador.
@@ -302,14 +383,19 @@ export async function sendMessage(
     proposed.filter((a) => a.type === 'propose_diagram' || a.type === 'generate_file'),
   )
 
-  const actions = [
-    ...questionActions,
-    ...fabricApplied.proposals,
-    ...toolProposals.valid,
-  ]
+  // Los nodos del historial ya no son propuestas: se crean solos al guardar el mensaje.
+  const actions = [...fabricApplied.proposals, ...toolProposals.valid]
   const droppedActions =
-    result.metadata.droppedActions + (proposed.length - actions.length) + toolProposals.dropped
-  const grounded = applyGrounding(result.response.output, result.response.grounding, retrieval)
+    result.metadata.droppedActions +
+    (proposed.length - actions.length - questionActions.length) +
+    toolProposals.dropped
+  const grounded = applyGrounding(
+    savedFallback
+      ? 'Te dejé una propuesta para guardar lo anterior en la Carpeta. Revisala y confirmala.'
+      : result.response.output,
+    result.response.grounding,
+    retrieval,
+  )
   const fabricMeta = fabricApplied.results.length
     ? {
         intents: [jev.intent],
@@ -351,6 +437,11 @@ export async function sendMessage(
       },
       select: { id: true },
     })
+    await createHistoryNodes(
+      tx,
+      { userId, conversationId, subjectId: conversation.subjectId, messageId: reply.id },
+      historyNodes,
+    )
     if (actions.length) {
       await tx.agentAction.createMany({
         data: actions.map((a) => ({

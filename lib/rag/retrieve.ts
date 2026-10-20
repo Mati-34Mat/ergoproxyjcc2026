@@ -43,7 +43,55 @@ function findMentionedFiles<T extends { name: string }>(query: string, files: T[
   })
 }
 
-type ChunkRow = { fileId: string; fileName: string; pageNumber: number; content: string; score: number }
+type ChunkRow = { fileId: string; fileName: string; pageNumber: number; content: string; score: number; rn?: number }
+
+const MAX_EXERCISE_REFS = 3
+const EXERCISE_HITS = 3
+const MAX_EXTRA_CHUNKS = 3
+const MIN_OVERLAP = 20
+
+/**
+ * Une fragmentos consecutivos de una misma página en un solo texto, quitando el solapamiento
+ * que el partido en fragmentos duplica, para que el enunciado llegue al modelo de corrido.
+ */
+function mergeAdjacentChunks(rows: ChunkRow[]): ChunkRow[] {
+  const merged: ChunkRow[] = []
+  for (const row of rows) {
+    const last = merged[merged.length - 1]
+    const adjacent =
+      last &&
+      last.fileId === row.fileId &&
+      last.pageNumber === row.pageNumber &&
+      last.rn !== undefined &&
+      row.rn !== undefined &&
+      row.rn === last.rn + 1
+    if (!adjacent) {
+      merged.push({ ...row })
+      continue
+    }
+    let overlap = 0
+    for (let size = Math.min(last.content.length, row.content.length, 400); size >= MIN_OVERLAP; size--) {
+      if (last.content.endsWith(row.content.slice(0, size))) {
+        overlap = size
+        break
+      }
+    }
+    last.content = overlap > 0 ? last.content + row.content.slice(overlap) : `${last.content} ${row.content}`
+    last.rn = row.rn
+  }
+  return merged
+}
+
+/** Números de ejercicio pedidos en el mensaje: "ej 1", "ejercicio 12", "ej. n°3". */
+function findExerciseNumbers(query: string) {
+  const text = normalize(query)
+  const numbers = new Set<number>()
+  for (const match of text.matchAll(/\bej(?:ercicios?|s)?\b\.?\s*(?:n[°º.]*\s*)?(\d{1,3})\b/g)) {
+    numbers.add(Number.parseInt(match[1], 10))
+    if (numbers.size >= MAX_EXERCISE_REFS) break
+  }
+  return [...numbers]
+}
 
 /**
  * Busca los fragmentos más cercanos a la pregunta dentro del alcance permitido.
@@ -149,8 +197,57 @@ export async function retrieveContext({
       LIMIT ${topK}
     `
 
-    const sources: RagSource[] = rows
-      .filter((row) => row.score >= minScore)
+    // Un enunciado suele quedar partido entre dos fragmentos (texto y código): se trae el que
+    // abre "Ejercicio N" y el siguiente, porque la similitud semántica no distingue "ej 1" de "ej 2".
+    const exerciseRows: ChunkRow[] = []
+    for (const exercise of findExerciseNumbers(query)) {
+      const pattern = `(^|[^0-9a-zA-Z])ejercicio\\s*${exercise}([^0-9]|$)`
+      const otherPattern = `(^|[^0-9a-zA-Z])ejercicio\\s*(?!${exercise}([^0-9]|$))[0-9]+`
+      const found = await db.$queryRaw<ChunkRow[]>`
+        WITH ordered AS (
+          SELECT c."fileId", c."pageNumber", c."content",
+                 (row_number() OVER (PARTITION BY c."fileId" ORDER BY c."pageNumber", c."chunkIndex"))::int AS rn
+          FROM "file_chunks" c
+          WHERE c."fileId" = ANY(${fileIds}::uuid[])
+        ), hits AS (
+          SELECT "fileId", rn FROM ordered WHERE "content" ~* ${pattern} ORDER BY "fileId", rn LIMIT ${EXERCISE_HITS}
+        ), spans AS (
+          SELECT h."fileId", h.rn AS start_rn,
+                 LEAST(
+                   h.rn + ${MAX_EXTRA_CHUNKS},
+                   COALESCE(
+                     (SELECT MIN(o2.rn) FROM ordered o2
+                      WHERE o2."fileId" = h."fileId" AND o2.rn > h.rn AND o2."content" ~* ${otherPattern}),
+                     h.rn + ${MAX_EXTRA_CHUNKS}
+                   )
+                 ) AS end_rn
+          FROM hits h
+        )
+        SELECT DISTINCT o."fileId" AS "fileId", f."name" AS "fileName", o."pageNumber" AS "pageNumber",
+               o."content" AS "content", 1::float8 AS "score", o.rn AS "rn"
+        FROM ordered o
+        JOIN spans s ON s."fileId" = o."fileId" AND o.rn BETWEEN s.start_rn AND s.end_rn
+        JOIN "files" f ON f."id" = o."fileId"
+        WHERE f."status" = 'ready'
+          AND f."indexStatus" = 'indexed'
+          AND (
+            f."userId" = ${userId}
+            OR (f."visibility" = 'organization' AND f."organizationId" = ANY(${organizationIds}::uuid[]))
+          )
+        ORDER BY o."fileId", o.rn
+      `
+      exerciseRows.push(...mergeAdjacentChunks(found))
+    }
+
+    const seen = new Set<string>()
+    const merged = [...exerciseRows, ...rows.filter((row) => row.score >= minScore)].filter((row) => {
+      const key = `${row.fileId}:${row.pageNumber}:${row.content}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+    const sources: RagSource[] = merged
       .map((row, index) => ({
         ref: index + 1,
         fileId: row.fileId,

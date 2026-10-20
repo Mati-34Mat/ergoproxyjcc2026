@@ -7,6 +7,7 @@ import { isUuid } from '@/lib/data/queries'
 import { nextNodePosition } from '@/lib/data/tree-layout'
 import { db } from '@/lib/db'
 import { demoModeBlock, getUserId } from '@/lib/session'
+import { branchForQuestionNode, ensureRootNode, loadTree } from '@/lib/tree/branch'
 import type { ActionResult } from '@/lib/types'
 
 const questionSchema = z.object({
@@ -105,6 +106,42 @@ export async function deleteQuestion(id: string): Promise<ActionResult> {
   if (count === 0) return { ok: false, error: 'No encontramos la duda.' }
   revalidatePath('/', 'layout')
   return { ok: true }
+}
+
+/**
+ * "Continuar desde aquí": bifurca la sesión donde nació la duda (o sigue en su rama si es lo último)
+ * y la deja activa, para que el chat abra directo en ese punto. Un nodo sin sesión de origen no tiene
+ * dónde bifurcar: devuelve `conversationId: null` y el cliente lo usa solo como foco del próximo mensaje.
+ */
+export async function continueFromQuestionNode(
+  questionNodeId: string,
+): Promise<ActionResult<{ conversationId: string | null }>> {
+  const blocked = demoModeBlock()
+  if (blocked) return blocked
+  const userId = await getUserId()
+  if (!isUuid(questionNodeId)) return { ok: false, error: 'No encontramos la duda.' }
+
+  const questionNode = await db.questionNode.findFirst({
+    where: { id: questionNodeId, userId },
+    select: { conversationId: true },
+  })
+  if (!questionNode) return { ok: false, error: 'No encontramos la duda.' }
+  const conversationId = questionNode.conversationId
+  if (!conversationId) return { ok: true, data: { conversationId: null } }
+
+  await ensureRootNode(conversationId, userId)
+  const tree = await loadTree(conversationId, userId)
+  const fork = await branchForQuestionNode(conversationId, userId, questionNodeId, tree)
+  if (!fork.ok) return { ok: false, error: fork.error }
+  if (fork.nodeId) {
+    await db.conversation.updateMany({
+      where: { id: conversationId, userId },
+      data: { activeNodeId: fork.nodeId },
+    })
+  }
+
+  revalidatePath('/', 'layout')
+  return { ok: true, data: { conversationId } }
 }
 
 /** Guarda la posición de un nodo en el canvas del mapa de dudas. Las coordenadas son porcentajes. */

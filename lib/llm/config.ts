@@ -4,7 +4,8 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { LanguageModel } from 'ai'
 
 const GATEWAY_DEFAULT_MODEL = 'openai/gpt-5-mini'
-const OPENROUTER_DEFAULT_MODEL = 'openai/gpt-4o-mini'
+const OPENROUTER_DEFAULT_MODEL = 'openai/gpt-4.1-nano'
+const OPENROUTER_RETRY_MODEL = 'openai/gpt-4o-mini'
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 const OPENCODE_DEFAULT_MODEL = 'big-pickle'
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
@@ -74,6 +75,16 @@ export function getLlmFallback(failed: LlmProvider): LlmSelection | null {
     return { model: GATEWAY_DEFAULT_MODEL, modelId: GATEWAY_DEFAULT_MODEL, provider: 'gateway-default' }
   }
   return null
+}
+
+/**
+ * Otro modelo barato de OpenRouter para cuando el principal está saturado (429)
+ * o falla del lado del proveedor (5xx). Devuelve null si no aplica.
+ */
+export function getLlmRetryModel(current: { provider: LlmProvider; modelId: string }): LlmSelection | null {
+  const routerKey = openRouterKey()
+  if (current.provider !== 'openrouter' || !routerKey || current.modelId === OPENROUTER_RETRY_MODEL) return null
+  return openRouter(routerKey, OPENROUTER_RETRY_MODEL)
 }
 
 export type LlmStatus = { configured: boolean; model: string | null }

@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { APICallError, generateText, NoObjectGeneratedError, Output, RetryError, type LanguageModel } from 'ai'
-import { getLlmFallback, getLlmServerConfig } from '@/lib/llm/config'
+import { getLlmFallback, getLlmRetryModel, getLlmServerConfig } from '@/lib/llm/config'
 import {
   agentResponseSchema,
   MODE_LABELS,
@@ -130,6 +130,7 @@ function buildFolderPrompt(folder: FolderPromptInfo) {
   const lines = [
     `La Carpeta es el cuaderno ordenado del estudiante, separado de este chat. Acción disponible: {"type":"propose_folder_change","operation":<${operations}>,"target_node_id":<id>|null,"related_node_id":<id>|null,"edge_kind":<${edgeKinds}>|null,"node_type":<${kinds}>|null,"title":<hasta ${TITLE_MAX} caracteres>|null,"content_md":<Markdown>|null,"solution_md":<Markdown>|null,"reason":<por qué conviene guardarlo>}.`,
     `Usala SOLO cuando lo explicado tiene valor para estudiar después (una definición, los puntos clave de un tema, un ejercicio con su resolución) o cuando el estudiante pide guardarlo. Máximo ${MAX_FOLDER_PROPOSALS_PER_MESSAGE} por respuesta; la mayoría de las respuestas no necesitan ninguna.`,
+    'Si el estudiante pide guardar o agregar algo a la Carpeta ("agregame esto", "guardalo", "sumalo a la carpeta"), SIEMPRE incluí una acción propose_folder_change con el contenido real y completo de lo explicado antes en content_md (copialo de tu respuesta anterior, no lo resumas). Nunca digas que no podés modificar la Carpeta: la propuesta no se ejecuta sola, el estudiante la confirma. En ese caso avisale en output que le dejaste la propuesta para confirmar.',
     '- create_node: apunte nuevo (title y content_md obligatorios; node_type opcional). En target_node_id podés poner el apunte que lo contiene, o null.',
     '- append_content: agrega contenido a un apunte que YA existe (target_node_id y content_md). Preferilo sobre create_node cuando el tema ya está en la lista.',
     '- replace_content: reescribe el apunte entero (target_node_id y content_md). Usalo solo si el contenido viejo quedó mal, nunca para agregar.',
@@ -157,8 +158,8 @@ function buildQuestionMapPrompt(questions: QuestionMapPromptInfo, focusNodeId: s
   if (!questions.canPropose) return ''
   const lines = [
     'Historial de dudas: es el árbol de preguntas de la materia que el estudiante ve y usa para volver a cualquier tema. Acción: {"type":"propose_question_node","parent_node_id":<id de la lista o null>,"title":<alias de 2 a 6 palabras>,"description":<qué se resolvió, en una oración>}.',
-    '- El nodo representa la duda que el estudiante ACABA de hacer y que esta respuesta resolvió; nunca un tema que podría venir después. Proponé UN nodo en cada respuesta que resuelva una duda concreta nueva (un concepto, un ejercicio, un paso o un método) que todavía no figure en la lista. No lo propongas para saludos, agradecimientos ni repreguntas que siguen dentro del mismo tema de un nodo existente.',
-    '- title: el mismo concepto que pusiste en description (por ejemplo, a «¿Qué es una derivada?» le corresponde «Definición de derivada», no «Aplicaciones de la derivada»). Nunca copies la pregunta.',
+    '- El nodo representa la duda que el estudiante ACABA de hacer y que esta respuesta resolvió; nunca un tema que podría venir después. Incluí UN nodo en TODAS tus respuestas, incluso saludos, agradecimientos y repreguntas: se agrega solo al historial, sin que el estudiante lo confirme. Si la duda sigue dentro del tema de un nodo existente, colgala de ese nodo con un título propio (el paso, el caso o el matiz que se preguntó) en lugar de repetir el título.',
+    '- title: el mismo concepto que pusiste en description (por ejemplo, a «¿Qué es una derivada?�� le corresponde «Definición de derivada», no «Aplicaciones de la derivada»). Nunca copies la pregunta.',
     '- parent_node_id, en este orden: 1) si el estudiante eligió un nodo para continuar, ese; 2) si la duda profundiza o sigue la conversación reciente, el nodo marcado (actual); 3) si no, el nodo existente más general del que es un subtema (puede ser de otra sesión), prefiriendo el concepto antes que un ejemplo; 4) null si no se relaciona con ninguno.',
   ]
   if (questions.nodes.length) {
@@ -278,9 +279,14 @@ export async function runAgent({
       result = await generate(config.model)
     } catch (error) {
       const status = providerStatus(error)
-      const fallback = [401, 402, 403].includes(status ?? 0) ? getLlmFallback(config.provider) : null
+      const overloaded = status === 429 || (status !== undefined && status >= 500)
+      const fallback = [401, 402, 403].includes(status ?? 0)
+        ? getLlmFallback(config.provider)
+        : overloaded
+          ? getLlmRetryModel(config)
+          : null
       if (!fallback) throw error
-      console.error(`[llm] ${config.provider} rechazó la clave (HTTP ${status}); se usa ${fallback.provider}.`)
+      console.error(`[llm] ${config.modelId} falló (HTTP ${status}); se reintenta con ${fallback.modelId}.`)
       modelId = fallback.modelId
       result = await generate(fallback.model)
     }
@@ -288,7 +294,8 @@ export async function runAgent({
     // El esquema de generación usa una variante "plana" de las propuestas (sin
     // refinamientos, por límites del proveedor). Acá se revalidan una por una con
     // el contrato estricto: las que no cumplen se descartan y no llegan a guardarse.
-    const { valid, dropped } = validateActions(actions)
+    const { valid, dropped, issues } = validateActions(actions)
+    if (issues.length) console.error('[llm] Acciones descartadas:', issues.join(' || '))
     return {
       response: { output, description, grounding, actions: valid },
       metadata: { model: modelId, recovery: 'none', droppedActions: dropped },

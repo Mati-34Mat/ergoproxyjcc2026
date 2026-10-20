@@ -5,23 +5,43 @@ import { openRouterKey } from '@/lib/llm/config'
 import { EMBEDDING_DIMENSIONS, getRagConfig } from './config'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+const DEFAULT_GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001'
 // Por debajo del límite de tokens por pedido de los proveedores, con fragmentos de hasta 4000 caracteres.
 const EMBED_BATCH_SIZE = 64
 
 export class EmbeddingError extends Error {}
 
+// Gemini va primero: cada proveedor genera vectores incompatibles entre sí, así que la clave de
+// OpenRouter (pensada para el chat) no puede cambiar el proveedor con el que se indexó.
 function embeddingModel(modelId: string): EmbeddingModel {
-  const apiKey = openRouterKey()
-  if (!apiKey) return modelId // AI Gateway con las credenciales del entorno de Vercel
-  return createOpenAICompatible({
-    name: 'openrouter',
-    baseURL: OPENROUTER_BASE_URL,
-    apiKey,
-  }).embeddingModel(modelId)
+  const geminiKey = process.env.GEMINI_API_KEY?.trim()
+  if (geminiKey) {
+    // Los ids de Gemini no llevan prefijo de proveedor; si EMBEDDING_MODEL es `proveedor/modelo` se usa el default.
+    const geminiModelId = modelId.includes('/') ? DEFAULT_GEMINI_EMBEDDING_MODEL : modelId
+    return createOpenAICompatible({
+      name: 'gemini',
+      baseURL: GEMINI_BASE_URL,
+      apiKey: geminiKey,
+    }).embeddingModel(geminiModelId)
+  }
+  const routerKey = openRouterKey()
+  if (routerKey) {
+    return createOpenAICompatible({
+      name: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      apiKey: routerKey,
+    }).embeddingModel(modelId)
+  }
+  return modelId // AI Gateway con las credenciales del entorno de Vercel
 }
 
 function describeFailure(error: unknown) {
   if (error instanceof EmbeddingError) return error.message
+  const message = error instanceof Error ? error.message : ''
+  if (/credit card|customer_verification_required/i.test(message)) {
+    return 'AI Gateway necesita una tarjeta de crédito cargada en el equipo de Vercel. Cargala en Vercel (AI > Add credit card) o definí GEMINI_API_KEY (clave gratuita de Google AI Studio, sin tarjeta) u OPENROUTER_API_KEY.'
+  }
   if (APICallError.isInstance(error)) {
     if (error.statusCode === 401 || error.statusCode === 403) {
       return 'El proveedor de embeddings rechazó la clave de acceso.'
