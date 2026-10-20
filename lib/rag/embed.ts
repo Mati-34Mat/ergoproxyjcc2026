@@ -12,15 +12,9 @@ const EMBED_BATCH_SIZE = 64
 
 export class EmbeddingError extends Error {}
 
+// Gemini va primero: cada proveedor genera vectores incompatibles entre sí, así que la clave de
+// OpenRouter (pensada para el chat) no puede cambiar el proveedor con el que se indexó.
 function embeddingModel(modelId: string): EmbeddingModel {
-  const routerKey = openRouterKey()
-  if (routerKey) {
-    return createOpenAICompatible({
-      name: 'openrouter',
-      baseURL: OPENROUTER_BASE_URL,
-      apiKey: routerKey,
-    }).embeddingModel(modelId)
-  }
   const geminiKey = process.env.GEMINI_API_KEY?.trim()
   if (geminiKey) {
     // Los ids de Gemini no llevan prefijo de proveedor; si EMBEDDING_MODEL es `proveedor/modelo` se usa el default.
@@ -30,6 +24,14 @@ function embeddingModel(modelId: string): EmbeddingModel {
       baseURL: GEMINI_BASE_URL,
       apiKey: geminiKey,
     }).embeddingModel(geminiModelId)
+  }
+  const routerKey = openRouterKey()
+  if (routerKey) {
+    return createOpenAICompatible({
+      name: 'openrouter',
+      baseURL: OPENROUTER_BASE_URL,
+      apiKey: routerKey,
+    }).embeddingModel(modelId)
   }
   return modelId // AI Gateway con las credenciales del entorno de Vercel
 }
