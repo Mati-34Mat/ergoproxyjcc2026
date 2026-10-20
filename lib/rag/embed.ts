@@ -22,6 +22,10 @@ function embeddingModel(modelId: string): EmbeddingModel {
 
 function describeFailure(error: unknown) {
   if (error instanceof EmbeddingError) return error.message
+  const message = error instanceof Error ? error.message : ''
+  if (/credit card|customer_verification_required/i.test(message)) {
+    return 'AI Gateway necesita una tarjeta de crédito cargada en el equipo de Vercel. Cargala en Vercel (AI > Add credit card) o definí OPENROUTER_API_KEY.'
+  }
   if (APICallError.isInstance(error)) {
     if (error.statusCode === 401 || error.statusCode === 403) {
       return 'El proveedor de embeddings rechazó la clave de acceso.'
