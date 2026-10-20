@@ -4,7 +4,8 @@ import { db } from '@/lib/db'
 import { isDatabaseConfigured } from '@/lib/db/config'
 import { DIFFICULTY_DECAY, MAX_CONVERSATIONS_PER_SUBJECT, MAX_MESSAGES_PER_CONVERSATION, MIN_PRIORITY_SCORE, PROMPT_PRIORITY_LIMIT } from '@/lib/study/config'
 import { estimateDifficulty, type ThemeScore } from '@/lib/study/estimate'
-import type { StudyMessage, StudyQuestion, ThemeNode } from '@/lib/study/signals'
+import type { ReviewData, ReviewSession } from '@/lib/study/review'
+import { classifyText, type StudyMessage, type StudyQuestion, type ThemeNode } from '@/lib/study/signals'
 
 /**
  * Carga las señales reales de una materia y devuelve los temas de su Carpeta
@@ -136,6 +137,92 @@ export async function getStudyPriorities(
   return estimateDifficulty(themes, messages, questions, { decay: DIFFICULTY_DECAY }).filter(
     (t) => t.score >= MIN_PRIORITY_SCORE,
   )
+}
+
+const MAX_REVIEW_MESSAGES = 1500
+const QUOTE_MAX_CHARS = 140
+
+/**
+ * Datos del repaso de dudas: lee TODAS las sesiones de la materia (el historial visible es por
+ * sesión, pero esta evaluación necesita compararlas). Solo lectura.
+ */
+export async function getStudyReviewData(
+  userId: string,
+  subjectId: string | null,
+): Promise<ReviewData> {
+  const empty: ReviewData = { sessions: [], themes: [], quotes: [] }
+  if (!isDatabaseConfigured) return empty
+
+  const conversations = await db.conversation.findMany({
+    where: { userId, subjectId },
+    select: { id: true, title: true },
+    orderBy: { updatedAt: 'desc' },
+    take: MAX_CONVERSATIONS_PER_SUBJECT,
+  })
+  if (!conversations.length) return empty
+  const conversationIds = conversations.map((c) => c.id)
+
+  const [messages, nodes, priorities] = await Promise.all([
+    db.message.findMany({
+      where: { userId, role: 'user', conversationId: { in: conversationIds } },
+      select: { conversationId: true, content: true },
+      orderBy: { createdAt: 'desc' },
+      take: MAX_REVIEW_MESSAGES,
+    }),
+    db.questionNode.findMany({
+      where: { userId, conversationId: { in: conversationIds } },
+      select: { id: true, conversationId: true, parentId: true, question: true },
+      orderBy: { createdAt: 'asc' },
+    }),
+    getStudyPrioritiesForPrompt(userId, subjectId),
+  ])
+
+  const titleById = new Map(conversations.map((c) => [c.id, c.title]))
+  const nodeDepth = depthByParent(nodes)
+  const bySession = new Map<string, ReviewSession>(
+    conversations.map((c) => [
+      c.id,
+      {
+        title: c.title,
+        studentMessages: 0,
+        questions: [],
+        clarifications: 0,
+        struggles: 0,
+        reviewRequests: 0,
+        maxDepth: 0,
+      },
+    ]),
+  )
+
+  const quotes: ReviewData['quotes'] = []
+  for (const message of messages) {
+    const session = bySession.get(message.conversationId)
+    if (!session) continue
+    session.studentMessages += 1
+    const kinds = classifyText(message.content).map((s) => s.kind)
+    if (kinds.includes('clarification')) session.clarifications += 1
+    if (kinds.includes('exerciseStruggle')) session.struggles += 1
+    if (kinds.includes('reviewRequest')) session.reviewRequests += 1
+    if (kinds.length && quotes.length < 6) {
+      const text = message.content.replace(/\s+/g, ' ').trim()
+      quotes.push({
+        session: session.title,
+        text: text.length > QUOTE_MAX_CHARS ? `${text.slice(0, QUOTE_MAX_CHARS)}…` : text,
+      })
+    }
+  }
+  for (const node of nodes) {
+    const session = node.conversationId ? bySession.get(node.conversationId) : undefined
+    if (!session) continue
+    session.questions.push(node.question)
+    session.maxDepth = Math.max(session.maxDepth, nodeDepth.get(node.id) ?? 0)
+  }
+
+  return {
+    sessions: [...bySession.values()],
+    themes: priorities.map((p) => ({ title: p.title, reasons: p.reasons })),
+    quotes,
+  }
 }
 
 /** Versión compacta que se inyecta en el prompt del agente. */

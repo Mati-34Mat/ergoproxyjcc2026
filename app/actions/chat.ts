@@ -14,7 +14,8 @@ import { isConversationMode, type ToolsMetadata } from '@/lib/llm/contract'
 import { applyGrounding } from '@/lib/rag/ground'
 import { retrieveContext } from '@/lib/rag/retrieve'
 import { demoModeBlock, getUserId } from '@/lib/session'
-import { getStudyPrioritiesForPrompt } from '@/lib/study/server'
+import { getStudyPrioritiesForPrompt, getStudyReviewData } from '@/lib/study/server'
+import { buildStudyReviewPrompt, wantsStudyReview } from '@/lib/study/review'
 import { classifyIntent } from '@/lib/jev/classify'
 import { decideFabricSkill } from '@/lib/jev/skill-map'
 import { applyFabricToProposals } from '@/lib/fabric/apply'
@@ -178,10 +179,17 @@ export async function sendMessage(
   // dónde escribir más. Es de solo lectura y nunca decide nada por sí sola.
   const studyPriorities = await getStudyPrioritiesForPrompt(userId, conversation.subjectId)
 
-  // Historial de dudas de la materia: el agente propone nodos nuevos y elige de cuál cuelgan.
+  // "¿Dónde tuve más preguntas?": junta señales de TODAS las sesiones de la materia (no solo
+  // esta), para que el agente pueda recomendar en qué profundizar con datos reales.
+  const reviewPrompt = wantsStudyReview(content)
+    ? buildStudyReviewPrompt(await getStudyReviewData(userId, conversation.subjectId))
+    : null
+
+  // Historial de dudas: cada conversación tiene el suyo (no se mezcla con el de otras sesiones).
+  // El agente propone nodos nuevos y elige de cuál cuelgan dentro de esta misma conversación.
   const [questionNodes, sessionNodes, focusNode] = await Promise.all([
     db.questionNode.findMany({
-      where: { userId, ...(conversation.subjectId ? { subjectId: conversation.subjectId } : {}) },
+      where: { userId, conversationId },
       select: { id: true, question: true },
       orderBy: { createdAt: 'desc' },
       take: MAX_QUESTION_NODES,
@@ -199,7 +207,7 @@ export async function sendMessage(
     }),
     rawFocusNodeId && isUuid(rawFocusNodeId)
       ? db.questionNode.findFirst({
-          where: { id: rawFocusNodeId, userId },
+          where: { id: rawFocusNodeId, userId, conversationId },
           select: { id: true, question: true },
         })
       : Promise.resolve(null),
@@ -279,6 +287,7 @@ export async function sendMessage(
         },
         focusNode,
         tools: { web: webOutcome, wantsFile: toolNeeds.file, wantsDiagram: toolNeeds.diagram },
+        reviewPrompt,
       }),
       classifyIntent(content, lastUserQuestion),
     ])
@@ -300,7 +309,7 @@ export async function sendMessage(
     questionParentIds.length
       ? (
           await db.questionNode.findMany({
-            where: { id: { in: questionParentIds }, userId },
+            where: { id: { in: questionParentIds }, userId, conversationId },
             select: { id: true },
           })
         ).map((n) => n.id)

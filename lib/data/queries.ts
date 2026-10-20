@@ -256,6 +256,15 @@ export async function listQuestionNodes(userId: string, subjectId?: string) {
   })
 }
 
+/** Historial de dudas de una sola conversación: cada sesión tiene su propio árbol. */
+export async function listConversationQuestionNodes(userId: string, conversationId: string | null) {
+  if (!isDatabaseConfigured || !conversationId || !isUuid(conversationId)) return []
+  return db.questionNode.findMany({
+    where: { userId, conversationId },
+    orderBy: { createdAt: 'asc' },
+  })
+}
+
 /**
  * Grafo completo de la Carpeta de una materia: apuntes, relaciones y de dónde
  * salió cada nota. Es independiente del mapa de dudas.

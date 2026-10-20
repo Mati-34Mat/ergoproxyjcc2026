@@ -157,11 +157,11 @@ function buildFolderPrompt(folder: FolderPromptInfo) {
 function buildQuestionMapPrompt(questions: QuestionMapPromptInfo, focusNodeId: string | null) {
   if (!questions.canPropose) return ''
   const lines = [
-    'Historial de dudas: es el árbol de preguntas de la materia que el estudiante ve y usa para volver a cualquier tema. Acción: {"type":"propose_question_node","parent_node_id":<id de la lista o null>,"title":<alias de 1 a 3 palabras, máximo 28 caracteres>,"description":<qué se resolvió, en una oración>}.',
+    'Historial de dudas: es el árbol de preguntas de ESTA sesión (cada sesión tiene el suyo, separado de las demás) que el estudiante ve y usa para volver a cualquier tema. Acción: {"type":"propose_question_node","parent_node_id":<id de la lista o null>,"title":<alias de 1 a 3 palabras, máximo 28 caracteres>,"description":<qué se resolvió, en una oración>}.',
     '- CANTIDAD DE NODOS: primero contá cuántas dudas distintas trae el mensaje del estudiante (dos o tres temas que se podrían estudiar por separado, aunque vengan en una sola oración o numeradas). Si trae 2 o 3, el arreglo "actions" DEBE tener un propose_question_node por cada una, cada uno con su propio title, description y parent_node_id: un solo nodo que junte los temas es un error. Ejemplo: «¿qué es una derivada? y ¿cómo funciona el ordenamiento burbuja?» => dos nodos, uno titulado «Definición de derivada» y otro «Ordenamiento burbuja». Respondé a todas las dudas en "output". Si trae una sola duda (o un saludo, agradecimiento o repregunta), incluí exactamente UN nodo. No dividas una duda única en pasos ni inventes dudas que el estudiante no hizo.',
     '- Los nodos se agregan solos al historial, sin que el estudiante los confirme. Cada nodo representa una duda que el estudiante ACABA de hacer y que esta respuesta resolvió; nunca un tema que podría venir después. Si la duda sigue dentro del tema de un nodo existente, colgala de ese nodo con un título propio (el paso, el caso o el matiz que se preguntó) en lugar de repetir el título.',
     '- title: es el alias del nodo en el mapa: 1 a 3 palabras y MÁXIMO 28 caracteres (el mapa corta lo que pase de ahí; inventá un nombre corto, no resumas la duda). Es el mismo concepto que pusiste en description (por ejemplo, a «¿Qué es una derivada?�� le corresponde «Definición de derivada», no «Aplicaciones de la derivada»). Nunca copies la pregunta.',
-    '- parent_node_id, en este orden: 1) si el estudiante eligió un nodo para continuar, ese; 2) si la duda profundiza o sigue la conversación reciente, el nodo marcado (actual); 3) si no, el nodo existente más general del que es un subtema (puede ser de otra sesión), prefiriendo el concepto antes que un ejemplo; 4) null solo si el historial está vacío o la duda no tiene relación alguna con la conversación; ante la duda, colgala del nodo (actual). Cuando un mensaje trae varias dudas, todas cuelgan del mismo padre salvo que una sea claramente subtema de otra.',
+    '- parent_node_id, en este orden: 1) si el estudiante eligió un nodo para continuar, ese; 2) si la duda profundiza o sigue la conversación reciente, el nodo marcado (actual); 3) si no, el nodo existente más general de esta sesión del que es un subtema, prefiriendo el concepto antes que un ejemplo; 4) null solo si el historial está vacío o la duda no tiene relación alguna con la conversación; ante la duda, colgala del nodo (actual). Cuando un mensaje trae varias dudas, todas cuelgan del mismo padre salvo que una sea claramente subtema de otra.',
   ]
   if (questions.nodes.length) {
     const marker = (id: string) =>
@@ -170,7 +170,7 @@ function buildQuestionMapPrompt(questions: QuestionMapPromptInfo, focusNodeId: s
       `Nodos existentes del historial de dudas:\n${questions.nodes.map((n) => `- ${n.id}: ${n.question}${marker(n.id)}`).join('\n')}`,
     )
   } else {
-    lines.push('El historial de dudas está vacío: el primer nodo va con parent_node_id null.')
+    lines.push('El historial de dudas de esta sesión está vacío: el primer nodo va con parent_node_id null.')
   }
   return lines.join('\n')
 }
@@ -210,6 +210,7 @@ function buildSystemPrompt(
   rag: RetrievalResult | undefined,
   focusNode: { id: string; question: string } | null,
   tools: ToolsPromptInfo | undefined,
+  reviewPrompt: string | null,
 ) {
   return [
     'Sos un tutor para estudiantes de ingeniería y ciencias exactas de la FCEIA (UNR). Respondé en español rioplatense, con claridad y paso a paso.',
@@ -227,6 +228,7 @@ function buildSystemPrompt(
     focusNode
       ? `El estudiante volvió al nodo ${focusNode.id} («${focusNode.question}») del historial de dudas y sigue preguntando desde ahí. Si la nueva duda es un subtema de ese nodo, usalo como parent_node_id.`
       : '',
+    reviewPrompt ?? '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -248,6 +250,7 @@ export async function runAgent({
   rag,
   focusNode = null,
   tools,
+  reviewPrompt = null,
 }: {
   mode: ConversationMode
   branch: BranchPromptInfo
@@ -259,9 +262,11 @@ export async function runAgent({
   focusNode?: { id: string; question: string } | null
   /** Herramientas del turno (búsqueda web ya ejecutada, intención de archivo/diagrama). */
   tools?: ToolsPromptInfo
+  /** Datos del repaso de dudas de toda la materia, si el estudiante lo pidió en este mensaje. */
+  reviewPrompt?: string | null
 }): Promise<AgentResult> {
   const config = getLlmServerConfig()
-  const system = buildSystemPrompt(mode, branch, folder, questions, rag, focusNode, tools)
+  const system = buildSystemPrompt(mode, branch, folder, questions, rag, focusNode, tools, reviewPrompt)
 
   const generate = (model: LanguageModel) =>
     generateText({

@@ -39,6 +39,7 @@ export interface SubjectsRepo {
   create(userId: string, input: SubjectInput): Promise<{ id: string }>
   createMany(userId: string, inputs: SubjectInput[]): Promise<number>
   update(userId: string, id: string, input: SubjectInput): Promise<boolean>
+  rename(userId: string, id: string, name: string): Promise<boolean>
   remove(userId: string, id: string): Promise<boolean>
 }
 
@@ -142,6 +143,16 @@ const postgresRepo: SubjectsRepo = {
     return count > 0
   },
 
+  async rename(userId, id, name) {
+    if (!uuid.safeParse(id).success) return false
+    const scope = await writeScope(userId)
+    const { count } = await db.subject.updateMany({
+      where: { AND: [scope, { id }] },
+      data: { name },
+    })
+    return count > 0
+  },
+
   async remove(userId, id) {
     if (!uuid.safeParse(id).success) return false
     const scope = await writeScope(userId)
@@ -197,6 +208,13 @@ const demoRepo: SubjectsRepo = {
     const found = demoStore.get(id)
     if (!found || found.userId !== userId) return false
     demoStore.set(id, { ...found, ...input, updatedAt: new Date() })
+    return true
+  },
+
+  async rename(userId, id, name) {
+    const found = demoStore.get(id)
+    if (!found || found.userId !== userId) return false
+    demoStore.set(id, { ...found, name, updatedAt: new Date() })
     return true
   },
 

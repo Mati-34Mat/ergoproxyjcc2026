@@ -349,3 +349,9 @@ html:has(.overlay),body:has(.overlay){overflow:hidden;height:100%;}
 /* Vista previa de una propuesta del agente en el chat */
 .action-meta{font-size:10px;color:#a2766d;margin:5px 0 0}
 .action-preview{margin-top:10px;background:#fff;border:1px solid #f0ddd7;border-radius:7px;padding:11px 13px;max-height:260px;overflow:auto}
+
+/* Renombrar materia desde la tarjeta */
+.subject-card-wrap{position:relative;display:flex}
+.subject-card-wrap>.subject-card{width:100%}
+.subject-rename{position:absolute;right:42px;top:14px;width:28px;height:28px;border:0;border-radius:7px;background:transparent;color:#c0c5ca;display:grid;place-items:center;transition:.15s}
+.subject-rename:hover,.subject-rename:focus-visible{background:var(--nodo-soft);color:var(--nodo-accent-dark)}

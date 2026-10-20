@@ -9,8 +9,8 @@ import type { HistoryNode } from '@/components/nodo/history-overlay'
 import {
   getConversationHeader,
   getFolderGraph,
+  listConversationQuestionNodes,
   listConversations,
-  listQuestionNodes,
 } from '@/lib/data/queries'
 import {
   FOLDER_EDGE_LABELS,
@@ -36,15 +36,17 @@ export default async function SubjectChatPage({
   const { sesion, desde } = await searchParams
   const user = await requireUser()
 
-  const [conversations, nodes, folder] = await Promise.all([
+  const [conversations, folder] = await Promise.all([
     listConversations(user.id, id),
-    listQuestionNodes(user.id, id),
     getFolderGraph(user.id, id),
   ])
 
   // Sin sesión en la URL se abre la más reciente, que es la primera de la lista.
   const activeId = sesion ?? conversations[0]?.id ?? null
-  const active = activeId ? await getConversationHeader(user.id, activeId) : undefined
+  const [active, nodes] = await Promise.all([
+    activeId ? getConversationHeader(user.id, activeId) : Promise.resolve(undefined),
+    listConversationQuestionNodes(user.id, activeId),
+  ])
 
   // Se muestra la rama activa: el camino heredado hasta la bifurcación más sus mensajes propios.
   let branch: Awaited<ReturnType<typeof loadBranch>> | null = null

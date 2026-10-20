@@ -78,6 +78,20 @@ export async function updateSubject(
   return { ok: true }
 }
 
+export async function renameSubject(id: string, name: string): Promise<ActionResult> {
+  if (id === GENERAL_WORKSPACE_ID) {
+    return { ok: false, error: 'El workspace General no se puede renombrar.' }
+  }
+  const parsed = subjectSchema.shape.name.safeParse(name)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
+
+  const userId = await getUserId()
+  const renamed = await getSubjectsRepo().rename(userId, id, parsed.data)
+  if (!renamed) return { ok: false, error: 'No encontramos la materia.' }
+  revalidatePath('/', 'layout')
+  return { ok: true }
+}
+
 export async function deleteSubject(id: string): Promise<ActionResult> {
   if (id === GENERAL_WORKSPACE_ID) {
     return { ok: false, error: 'El workspace General no se puede eliminar.' }
