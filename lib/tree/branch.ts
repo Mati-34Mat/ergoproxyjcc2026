@@ -2,6 +2,7 @@ import 'server-only'
 
 import { isUuid } from '@/lib/data/queries'
 import { db } from '@/lib/db'
+import { shortLabel } from '@/lib/tree/alias'
 import { pathTo, visibleMessages, type TreeNode } from '@/lib/tree/compose'
 import {
   ALIAS_MAX,
@@ -87,11 +88,7 @@ export function pickNodeId(
 
 /** Alias de rama dentro del tope, cortado en una palabra entera para que se lea bien. */
 function shortAlias(text: string) {
-  const clean = text.trim().replace(/\s+/g, ' ')
-  if (clean.length <= ALIAS_MAX) return clean
-  const cut = clean.slice(0, ALIAS_MAX - 1)
-  const lastSpace = cut.lastIndexOf(' ')
-  return `${lastSpace > ALIAS_MAX / 2 ? cut.slice(0, lastSpace) : cut}…`
+  return shortLabel(text, ALIAS_MAX)
 }
 
 /**

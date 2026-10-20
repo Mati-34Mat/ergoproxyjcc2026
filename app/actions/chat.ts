@@ -30,7 +30,12 @@ import {
   pickNodeId,
 } from '@/lib/tree/branch'
 import { composeContext, inheritedSize, otherBranches, type BranchNote } from '@/lib/tree/compose'
-import { INHERITED_COMPACT_CHARS, MAX_PROPOSALS_PER_MESSAGE } from '@/lib/tree/config'
+import { shortLabel } from '@/lib/tree/alias'
+import {
+  INHERITED_COMPACT_CHARS,
+  MAX_PROPOSALS_PER_MESSAGE,
+  QUESTION_ALIAS_MAX,
+} from '@/lib/tree/config'
 import { compactOwnContext, ensureInheritedSummary } from '@/lib/tree/summarize'
 import type { ActionResult } from '@/lib/types'
 
@@ -45,7 +50,7 @@ const MAX_SELECTED_FILES = 8
 const MAX_QUESTION_NODES = 40
 const SHORT_FOLLOW_UP_LENGTH = 60
 /** Tope del título de un nodo del historial (ver `proposeQuestionNodeSchema`). */
-const QUESTION_TITLE_MAX = 60
+const QUESTION_TITLE_MAX = QUESTION_ALIAS_MAX
 const CITATION_MARKERS = /\s?\[F\d+(?:\s*[,;]\s*F?\d+)*\]/g
 
 const normalizeTitle = (title: string) => title.trim().toLocaleLowerCase('es')
@@ -320,7 +325,11 @@ export async function sendMessage(
       const isFirst = proposed.findIndex((p) => p.type === 'propose_question_node') === index
       const useAlias =
         isFirst && proposedQuestionCount === 1 && answerAlias && answerAlias.length <= QUESTION_TITLE_MAX
-      const action = { ...a, parent_node_id: parentId, ...(useAlias ? { title: answerAlias } : {}) }
+      const action = {
+        ...a,
+        parent_node_id: parentId,
+        title: shortLabel(useAlias ? answerAlias : a.title, QUESTION_TITLE_MAX),
+      }
       const key = normalizeTitle(action.title)
       if (takenTitles.has(key)) return []
       takenTitles.add(key)
@@ -340,7 +349,7 @@ export async function sendMessage(
     const fallbackTitle =
       [answerAlias, questionText].find(
         (t) => t && t.length <= QUESTION_TITLE_MAX && !takenTitles.has(normalizeTitle(t)),
-      ) ?? questionText.slice(0, QUESTION_TITLE_MAX).trim()
+      ) ?? shortLabel(questionText, QUESTION_TITLE_MAX)
     historyNodes.push({
       parentId: focusNode?.id ?? currentNode?.id ?? null,
       title: fallbackTitle,

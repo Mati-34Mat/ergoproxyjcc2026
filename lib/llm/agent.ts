@@ -157,10 +157,10 @@ function buildFolderPrompt(folder: FolderPromptInfo) {
 function buildQuestionMapPrompt(questions: QuestionMapPromptInfo, focusNodeId: string | null) {
   if (!questions.canPropose) return ''
   const lines = [
-    'Historial de dudas: es el árbol de preguntas de la materia que el estudiante ve y usa para volver a cualquier tema. Acción: {"type":"propose_question_node","parent_node_id":<id de la lista o null>,"title":<alias de 2 a 6 palabras>,"description":<qué se resolvió, en una oración>}.',
+    'Historial de dudas: es el árbol de preguntas de la materia que el estudiante ve y usa para volver a cualquier tema. Acción: {"type":"propose_question_node","parent_node_id":<id de la lista o null>,"title":<alias de 1 a 3 palabras, máximo 28 caracteres>,"description":<qué se resolvió, en una oración>}.',
     '- CANTIDAD DE NODOS: primero contá cuántas dudas distintas trae el mensaje del estudiante (dos o tres temas que se podrían estudiar por separado, aunque vengan en una sola oración o numeradas). Si trae 2 o 3, el arreglo "actions" DEBE tener un propose_question_node por cada una, cada uno con su propio title, description y parent_node_id: un solo nodo que junte los temas es un error. Ejemplo: «¿qué es una derivada? y ¿cómo funciona el ordenamiento burbuja?» => dos nodos, uno titulado «Definición de derivada» y otro «Ordenamiento burbuja». Respondé a todas las dudas en "output". Si trae una sola duda (o un saludo, agradecimiento o repregunta), incluí exactamente UN nodo. No dividas una duda única en pasos ni inventes dudas que el estudiante no hizo.',
     '- Los nodos se agregan solos al historial, sin que el estudiante los confirme. Cada nodo representa una duda que el estudiante ACABA de hacer y que esta respuesta resolvió; nunca un tema que podría venir después. Si la duda sigue dentro del tema de un nodo existente, colgala de ese nodo con un título propio (el paso, el caso o el matiz que se preguntó) en lugar de repetir el título.',
-    '- title: el mismo concepto que pusiste en description (por ejemplo, a «¿Qué es una derivada?�� le corresponde «Definición de derivada», no «Aplicaciones de la derivada»). Nunca copies la pregunta.',
+    '- title: es el alias del nodo en el mapa: 1 a 3 palabras y MÁXIMO 28 caracteres (el mapa corta lo que pase de ahí; inventá un nombre corto, no resumas la duda). Es el mismo concepto que pusiste en description (por ejemplo, a «¿Qué es una derivada?�� le corresponde «Definición de derivada», no «Aplicaciones de la derivada»). Nunca copies la pregunta.',
     '- parent_node_id, en este orden: 1) si el estudiante eligió un nodo para continuar, ese; 2) si la duda profundiza o sigue la conversación reciente, el nodo marcado (actual); 3) si no, el nodo existente más general del que es un subtema (puede ser de otra sesión), prefiriendo el concepto antes que un ejemplo; 4) null solo si el historial está vacío o la duda no tiene relación alguna con la conversación; ante la duda, colgala del nodo (actual). Cuando un mensaje trae varias dudas, todas cuelgan del mismo padre salvo que una sea claramente subtema de otra.',
   ]
   if (questions.nodes.length) {
@@ -216,7 +216,7 @@ function buildSystemPrompt(
     MODE_GUIDANCE[mode],
     'Tu respuesta es un objeto JSON con cuatro campos:',
     '- output: el texto visible para el estudiante, en Markdown (podés usar listas, tablas y bloques de código).',
-    '- description: alias corto (2 a 5 palabras, máximo 80 caracteres) del concepto o problema específico tratado, por ejemplo «Sustitución en integrales». Nunca copies la pregunta completa.',
+    '- description: alias corto (1 a 3 palabras, máximo 28 caracteres) del concepto o problema específico tratado, por ejemplo «Sustitución en integrales». Nunca copies la pregunta completa.',
     '- grounding: "documents", "mixed", "general" o "insufficient" según cuánto de la respuesta se apoya en los documentos del estudiante (criterios abajo). Sin fragmentos de documentos, usá "general" o "insufficient".',
     '- actions: lista de acciones PROPUESTAS; el estudiante decide si las acepta. Incluí solo las que aporten (criterios abajo para cada una).',
     buildQuestionMapPrompt(questions, focusNode?.id ?? null),

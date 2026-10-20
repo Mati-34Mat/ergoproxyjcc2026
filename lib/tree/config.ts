@@ -3,6 +3,9 @@ export const ROOT_ALIAS = 'Pregunta inicial'
 /** Alias compacto: el mapa se vuelve ilegible con etiquetas largas. */
 export const ALIAS_MAX = 24
 
+/** Alias de los nodos del historial de dudas: tiene que entrar entero en la etiqueta del mapa (32). */
+export const QUESTION_ALIAS_MAX = 28
+
 export const MAX_PROPOSALS_PER_MESSAGE = 3
 export const MAX_NODES_PER_CONVERSATION = 40
 export const MAX_DEPTH = 5
