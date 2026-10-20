@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { isUuid } from '@/lib/data/queries'
 import { db } from '@/lib/db'
 import { MAX_NODES_PER_WORKSPACE } from '@/lib/folder/config'
+import { buildSaveProposal, wantsFolderSave } from '@/lib/folder/logic'
 import { loadFolderIndex, prepareFolderProposals } from '@/lib/folder/server'
 import { AgentError, runAgent } from '@/lib/llm/agent'
 import { isConversationMode, type ToolsMetadata } from '@/lib/llm/contract'
@@ -278,11 +279,29 @@ export async function sendMessage(
     })
     .slice(0, MAX_PROPOSALS_PER_MESSAGE)
   // Las de Carpeta se validan contra los apuntes reales: ids inventados y duplicados se descartan acá.
-  const folderPrepared = await prepareFolderProposals(
+  let folderPrepared = await prepareFolderProposals(
     userId,
     conversation.subjectId,
     proposed.filter((a) => a.type === 'propose_folder_change'),
   )
+  // Si pidió guardar y el modelo no emitió una propuesta válida, se arma una con la última
+  // respuesta del tutor. Sigue siendo una propuesta: la persona la confirma.
+  let savedFallback = false
+  const lastAssistantText = context.messages
+    .findLast((m) => m.role === 'assistant')
+    ?.content.replace(CITATION_MARKERS, '')
+  if (
+    wantsFolderSave(content) &&
+    folderPrepared.valid.length === 0 &&
+    folderIndex.nodes.length < MAX_NODES_PER_WORKSPACE &&
+    lastAssistantText
+  ) {
+    const fallback = buildSaveProposal(lastAssistantText)
+    if (fallback) {
+      folderPrepared = await prepareFolderProposals(userId, conversation.subjectId, [fallback])
+      savedFallback = folderPrepared.valid.length > 0
+    }
+  }
 
   // Jev decide qué skill de Fabric conviene para transformar el contenido que irá a la
   // Carpeta. El usuario sigue aprobando y editando: acá sólo se prepara el borrador.
@@ -309,7 +328,13 @@ export async function sendMessage(
   ]
   const droppedActions =
     result.metadata.droppedActions + (proposed.length - actions.length) + toolProposals.dropped
-  const grounded = applyGrounding(result.response.output, result.response.grounding, retrieval)
+  const grounded = applyGrounding(
+    savedFallback
+      ? 'Te dejé una propuesta para guardar lo anterior en la Carpeta. Revisala y confirmala.'
+      : result.response.output,
+    result.response.grounding,
+    retrieval,
+  )
   const fabricMeta = fabricApplied.results.length
     ? {
         intents: [jev.intent],
