@@ -4,7 +4,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { LanguageModel } from 'ai'
 
 const GATEWAY_DEFAULT_MODEL = 'openai/gpt-5-mini'
-const OPENROUTER_DEFAULT_MODEL = 'openai/gpt-4o-mini'
+const OPENROUTER_DEFAULT_MODEL = 'google/gemini-2.5-flash-lite'
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 const OPENCODE_DEFAULT_MODEL = 'big-pickle'
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
