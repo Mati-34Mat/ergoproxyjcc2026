@@ -36,13 +36,18 @@ export function extractJson(text: string): unknown {
 /** Valida cada acción por separado: las inválidas se descartan, nunca se ejecutan. */
 export function validateActions(raw: unknown[]) {
   const valid: AgentActionProposal[] = []
+  const issues: string[] = []
   let dropped = 0
   for (const item of raw) {
     const parsed = agentActionSchema.safeParse(item)
     if (parsed.success) valid.push(parsed.data)
-    else dropped += 1
+    else {
+      dropped += 1
+      const type = (item as { type?: unknown } | null)?.type
+      issues.push(`${typeof type === 'string' ? type : 'acción'}: ${parsed.error.issues.map((i) => i.message).slice(0, 3).join(' | ')}`)
+    }
   }
-  return { valid, dropped }
+  return { valid, dropped, issues }
 }
 
 /** Recupera una respuesta cuando el proveedor no cumplió el esquema. Devuelve null si no hay texto utilizable. */

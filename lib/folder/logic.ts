@@ -215,6 +215,34 @@ export function normalizeFolderProposal(
   }
 }
 
+const SAVE_VERB = /\b(agreg|guard|sum|anot|añad|anad|met|pon|sub|archiv)\w*/i
+
+/** ¿El estudiante pidió guardar algo en la Carpeta? ("agregame esto a la carpeta", "guardalo en mi carpeta"). */
+export function wantsFolderSave(text: string) {
+  return /\bcarpeta\b/i.test(text) && SAVE_VERB.test(text)
+}
+
+/**
+ * Propuesta de respaldo para cuando el estudiante pidió guardar y el modelo no la emitió: guarda la
+ * última respuesta del tutor como apunte nuevo. Sigue siendo una PROPUESTA que la persona confirma.
+ */
+export function buildSaveProposal(markdown: string): FolderProposal | null {
+  const content = markdown.trim().slice(0, CONTENT_MAX)
+  if (!content) return null
+  const firstLine = content
+    .split('\n')
+    .map((line) => line.replace(/^[\s#>*_`-]+|[\s*_`:]+$/g, '').trim())
+    .find(Boolean)
+  return {
+    ...blank(),
+    operation: 'create_node',
+    node_type: 'concept',
+    title: cleanTitle(firstLine ?? '') || 'Apunte de la conversación',
+    content_md: content,
+    reason: 'Lo pediste guardar desde el chat.',
+  }
+}
+
 /** Índice compacto de la Carpeta para el prompt: id, tipo y título (el contenido no se envía). */
 export function buildFolderIndex(nodes: NodeRef[]) {
   return nodes

@@ -127,6 +127,7 @@ function buildFolderPrompt(folder: FolderPromptInfo) {
   const lines = [
     `La Carpeta es el cuaderno ordenado del estudiante, separado de este chat. Acción disponible: {"type":"propose_folder_change","operation":<${operations}>,"target_node_id":<id>|null,"related_node_id":<id>|null,"edge_kind":<${edgeKinds}>|null,"node_type":<${kinds}>|null,"title":<hasta ${TITLE_MAX} caracteres>|null,"content_md":<Markdown>|null,"solution_md":<Markdown>|null,"reason":<por qué conviene guardarlo>}.`,
     `Usala SOLO cuando lo explicado tiene valor para estudiar después (una definición, los puntos clave de un tema, un ejercicio con su resolución) o cuando el estudiante pide guardarlo. Máximo ${MAX_FOLDER_PROPOSALS_PER_MESSAGE} por respuesta; la mayoría de las respuestas no necesitan ninguna.`,
+    'Si el estudiante pide guardar o agregar algo a la Carpeta ("agregame esto", "guardalo", "sumalo a la carpeta"), SIEMPRE incluí una acción propose_folder_change con el contenido real y completo de lo explicado antes en content_md (copialo de tu respuesta anterior, no lo resumas). Nunca digas que no podés modificar la Carpeta: la propuesta no se ejecuta sola, el estudiante la confirma. En ese caso avisale en output que le dejaste la propuesta para confirmar.',
     '- create_node: apunte nuevo (title y content_md obligatorios; node_type opcional). En target_node_id podés poner el apunte que lo contiene, o null.',
     '- append_content: agrega contenido a un apunte que YA existe (target_node_id y content_md). Preferilo sobre create_node cuando el tema ya está en la lista.',
     '- replace_content: reescribe el apunte entero (target_node_id y content_md). Usalo solo si el contenido viejo quedó mal, nunca para agregar.',
@@ -284,7 +285,8 @@ export async function runAgent({
     // El esquema de generación usa una variante "plana" de las propuestas (sin
     // refinamientos, por límites del proveedor). Acá se revalidan una por una con
     // el contrato estricto: las que no cumplen se descartan y no llegan a guardarse.
-    const { valid, dropped } = validateActions(actions)
+    const { valid, dropped, issues } = validateActions(actions)
+    if (issues.length) console.error('[llm] Acciones descartadas:', issues.join(' || '))
     return {
       response: { output, description, grounding, actions: valid },
       metadata: { model: modelId, recovery: 'none', droppedActions: dropped },
