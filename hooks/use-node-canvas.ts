@@ -50,6 +50,10 @@ export function useNodeCanvas<T extends CanvasNode>({
   const [isPanning, setIsPanning] = useState(false)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [positions, setPositions] = useState<Record<string, CanvasPoint>>({})
+  const positionsRef = useRef(positions)
+  useEffect(() => {
+    positionsRef.current = positions
+  }, [positions])
 
   const onMoveEndRef = useRef(onMoveEnd)
   const onEscapeRef = useRef(onEscape)
@@ -167,11 +171,8 @@ export function useNodeCanvas<T extends CanvasNode>({
       setDraggingId(null)
       document.body.style.userSelect = ''
       if (interaction?.type === 'node') {
-        setPositions((prev) => {
-          const point = prev[interaction.id]
-          if (point) onMoveEndRef.current?.(interaction.id, point.x, point.y)
-          return prev
-        })
+        const point = positionsRef.current[interaction.id]
+        if (point) onMoveEndRef.current?.(interaction.id, point.x, point.y)
       }
     }
     window.addEventListener('pointermove', move)
