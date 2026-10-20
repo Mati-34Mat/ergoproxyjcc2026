@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { APICallError, generateText, NoObjectGeneratedError, Output, RetryError, type LanguageModel } from 'ai'
-import { getLlmFallback, getLlmServerConfig } from '@/lib/llm/config'
+import { getLlmFallback, getLlmRetryModel, getLlmServerConfig } from '@/lib/llm/config'
 import {
   agentResponseSchema,
   MODE_LABELS,
@@ -278,9 +278,14 @@ export async function runAgent({
       result = await generate(config.model)
     } catch (error) {
       const status = providerStatus(error)
-      const fallback = [401, 402, 403].includes(status ?? 0) ? getLlmFallback(config.provider) : null
+      const overloaded = status === 429 || (status !== undefined && status >= 500)
+      const fallback = [401, 402, 403].includes(status ?? 0)
+        ? getLlmFallback(config.provider)
+        : overloaded
+          ? getLlmRetryModel(config)
+          : null
       if (!fallback) throw error
-      console.error(`[llm] ${config.provider} rechazó la clave (HTTP ${status}); se usa ${fallback.provider}.`)
+      console.error(`[llm] ${config.modelId} falló (HTTP ${status}); se reintenta con ${fallback.modelId}.`)
       modelId = fallback.modelId
       result = await generate(fallback.model)
     }
