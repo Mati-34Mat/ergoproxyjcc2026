@@ -1,5 +1,6 @@
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/lib/generated/prisma/client'
+import { normalizeConnectionString } from '@/lib/db/connection-string'
 
 /**
  * Cliente Prisma para pruebas de integración. Se apunta a `TEST_DATABASE_URL`
@@ -10,7 +11,10 @@ import { PrismaClient } from '@/lib/generated/prisma/client'
 export const hasTestDb = Boolean(process.env.TEST_DATABASE_URL)
 
 export function testClient() {
-  const adapter = new PrismaPg({ connectionString: process.env.TEST_DATABASE_URL, max: 2 })
+  const adapter = new PrismaPg({
+    connectionString: normalizeConnectionString(process.env.TEST_DATABASE_URL),
+    max: 2,
+  })
   return new PrismaClient({ adapter })
 }
 

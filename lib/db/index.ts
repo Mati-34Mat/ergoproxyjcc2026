@@ -1,6 +1,7 @@
 import 'server-only'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/lib/generated/prisma/client'
+import { normalizeConnectionString } from '@/lib/db/connection-string'
 
 const globalForDb = globalThis as unknown as { prisma?: PrismaClient }
 
@@ -15,7 +16,7 @@ function poolMax() {
 
 function createClient() {
   const adapter = new PrismaPg({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: normalizeConnectionString(process.env.DATABASE_URL),
     max: poolMax(),
   })
   return new PrismaClient({ adapter })
