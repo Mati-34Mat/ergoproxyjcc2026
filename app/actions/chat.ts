@@ -306,12 +306,16 @@ export async function sendMessage(
   // tema que vendría después): el primer nodo propuesto toma ese alias si entra en el tope.
   const answerAlias = result.response.description?.trim().replace(/[.\s]+$/, '') ?? ''
   const takenTitles = new Set(questionNodes.map((n) => normalizeTitle(n.question)))
+  // Con dos o más dudas en el mensaje, el alias de `description` cubre la respuesta entera y no
+  // una sola duda: cada nodo conserva su propio título.
+  const proposedQuestionCount = proposed.filter((p) => p.type === 'propose_question_node').length
   const questionActions = proposed
     .flatMap((a, index) => {
       if (a.type !== 'propose_question_node') return []
       if (a.parent_node_id !== null && !ownedParents.has(a.parent_node_id)) return []
       const isFirst = proposed.findIndex((p) => p.type === 'propose_question_node') === index
-      const useAlias = isFirst && answerAlias && answerAlias.length <= QUESTION_TITLE_MAX
+      const useAlias =
+        isFirst && proposedQuestionCount === 1 && answerAlias && answerAlias.length <= QUESTION_TITLE_MAX
       const action = useAlias ? { ...a, title: answerAlias } : a
       const key = normalizeTitle(action.title)
       if (takenTitles.has(key)) return []
