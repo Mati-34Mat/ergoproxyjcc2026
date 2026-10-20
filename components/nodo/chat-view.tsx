@@ -221,7 +221,7 @@ export function ChatView({
                   )}
                   <div className="message-content">
                     <span className="message-label">
-                      {message.role === 'assistant' ? 'NODO AI' : 'TÚ'}
+                      {message.role === 'assistant' ? 'ASISTENTE' : 'TÚ'}
                     </span>
                     {message.role === 'assistant' ? (
                       <Markdown>{message.content}</Markdown>
